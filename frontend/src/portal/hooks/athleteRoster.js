@@ -5,8 +5,9 @@
  * open. New surface, kept out of live.js and index.js (the signups.js
  * precedent); imports shared primitives FROM ./live, never the other way.
  *
- * Reads: all athletes and all households (the fetches the admin dashboard
- * uses), then ONE getDocs of athletes/{id}/milestones per real athlete, in
+ * Reads: all athletes and all households, each from the server only
+ * (getDocsFromServer: an offline device gets the screen's load error and retry, never a
+ * short or empty list shown as everyone), then ONE getDocs of athletes/{id}/milestones per real athlete, in
  * parallel, from the server only (getDocsFromServer): an offline device must not answer
  * from its cache, which is empty for an athlete it never read and would read as "not done".
  * No collection-group query, no listener, no polling, and no
@@ -24,7 +25,7 @@ import { useState } from 'react';
 import { collection, getDocsFromServer } from 'firebase/firestore';
 import { auth, db } from '../../firebase';
 import useSeedResource from './useSeedResource';
-import { ERR, LiveDataError, fetchAllAthletes, fetchAllHouseholds, fetchCurrentUser, isLive, wrap } from './live';
+import { ERR, LiveDataError, fetchCurrentUser, isLive, wrap } from './live';
 import { INTAKE_KEY, MARK_CHANGED, createIntake, deleteIntake, deviceStamped, expectedMark, fetchIntake, intakeStamp } from './parallaxLive';
 import { forgetIntake } from './parallax';
 import { FITNESS_DOC_ID, INTAKE_DOC_ID, intakeByName, intakeDoc } from '../data/combine';
@@ -44,8 +45,20 @@ async function fetchMarks(athleteId) {
   }
 }
 
+/** A whole collection from the server only: offline it fails, where a cache read would answer short or empty. */
+async function fetchListFromServer(name) {
+  try {
+    const snap = await getDocsFromServer(collection(db, name));
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    throw wrap(err, `fetchListFromServer(${name})`);
+  }
+}
+
 async function loadRoster() {
-  const [user, allAthletes, allHouseholds] = await Promise.all([fetchCurrentUser(), fetchAllAthletes(), fetchAllHouseholds()]);
+  const [user, allAthletes, allHouseholds] = await Promise.all([
+    fetchCurrentUser(), fetchListFromServer('athletes'), fetchListFromServer('households'),
+  ]);
   const { athletes } = withoutTestFamilies({ households: allHouseholds, athletes: allAthletes });
   const marks = {};
   await Promise.all(athletes.map(async (a) => {
@@ -114,7 +127,7 @@ export function useAthleteRoster() {
     const result = await createIntake(athleteId, body, docId);
     // The server's own time replaces this on the next open; until then the
     // device's clock dates the tick (and starts its ten-minute undo).
-    show(athleteId, docId, result.status === 'already' ? result.milestone : deviceStamped({ ...body, at: new Date() }));
+    show(athleteId, docId, result.milestone ?? deviceStamped({ ...body, at: new Date() }));
     wrote(athleteId, docId);
     return result.status;
   };

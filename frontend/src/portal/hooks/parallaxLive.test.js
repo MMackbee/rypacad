@@ -6,7 +6,7 @@
 jest.mock('../../firebase', () => ({ auth: { currentUser: { uid: 'u-luke' } }, db: {} }));
 jest.mock('firebase/firestore', () => ({
   doc: jest.fn((db, ...p) => ({ path: p.join('/') })),
-  getDoc: jest.fn(), setDoc: jest.fn(), deleteDoc: jest.fn(), runTransaction: jest.fn(), serverTimestamp: jest.fn(() => 'NOW'),
+  getDoc: jest.fn(), setDoc: jest.fn(), deleteDoc: jest.fn(), runTransaction: jest.fn(), getDocFromServer: jest.fn(), serverTimestamp: jest.fn(() => 'NOW'),
 }));
 import { deleteDoc, doc, getDoc, runTransaction, serverTimestamp, setDoc } from 'firebase/firestore';
 import { ERR } from './live';
@@ -158,5 +158,26 @@ describe('the fitness assessment mark (hq card 14): the same calls with a doc id
     getDoc.mockResolvedValueOnce({ exists: () => true, data: () => theirs });
     expect(await createIntake('a1', BODY, 'fitnessAssessment')).toEqual({ status: 'already', milestone: theirs });
     expect(getDoc).toHaveBeenLastCalledWith({ path: FIT });
+  });
+});
+
+describe('a tick reads itself back from the server (card 14, round 8)', () => {
+  const { getDocFromServer } = jest.requireMock('firebase/firestore');
+
+  test('createIntake returns the stored mark from a server-only read', async () => {
+    setDoc.mockResolvedValueOnce();
+    const mark = READ();
+    getDocFromServer.mockResolvedValueOnce({ exists: () => true, data: () => mark });
+    expect(await createIntake('a1', BODY)).toEqual({ status: 'done', milestone: mark });
+    expect(getDocFromServer).toHaveBeenCalledWith({ path: PATH });
+    expect(getDoc).not.toHaveBeenCalled();
+  });
+
+  test('a read-back that rejects or finds nothing is still plain done', async () => {
+    setDoc.mockResolvedValue();
+    getDocFromServer.mockRejectedValueOnce({ code: 'unavailable' });
+    expect(await createIntake('a1', BODY)).toEqual({ status: 'done' });
+    getDocFromServer.mockResolvedValueOnce({ exists: () => false });
+    expect(await createIntake('a1', BODY)).toEqual({ status: 'done' });
   });
 });

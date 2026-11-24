@@ -7,7 +7,10 @@
  * The same three calls serve the fitness assessment mark (hq card 14): an
  * optional doc id, default parallaxIntake, so every existing caller is unchanged.
  *
- * A tick is a plain setDoc of the four keys data/combine.js intakeDoc builds.
+ * A tick is a plain setDoc of the four keys data/combine.js intakeDoc builds,
+ * then a server-only read-back of the stored mark (getDocFromServer), so the
+ * screen can show the mark with the server's time and an undo can match it on
+ * author and time. A read-back that fails never turns the saved tick into an error.
  * When another coach ticked first, the rules see the second write as an
  * update and refuse it: the refusal is re-read, and a tick that is there
  * answers `{ status: 'already', milestone }` (Review Focus 4), so the screen
@@ -17,7 +20,7 @@
  * deleteIntake takes that mark as `expected` and checks it against the stored
  * one inside a transaction, so a tap never erases a replacement it did not see.
  */
-import { doc, getDoc, runTransaction, serverTimestamp, setDoc } from 'firebase/firestore';
+import { doc, getDoc, getDocFromServer, runTransaction, serverTimestamp, setDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { ERR, LiveDataError, requireUser, wrap } from './live';
 import { bump } from './invalidate';
@@ -75,7 +78,7 @@ export async function fetchIntake(athleteId, docId = INTAKE_DOC_ID) {
   }
 }
 
-/** Tick: `{ status: 'done' }`, or `{ status: 'already', milestone }` when someone ticked first. */
+/** Tick: `{ status: 'done', milestone? }` (the stored mark, when the read-back found it), or `{ status: 'already', milestone }` when someone ticked first. */
 export async function createIntake(athleteId, body, docId = INTAKE_DOC_ID) {
   requireAthlete(athleteId, 'createIntake');
   requireUser();
@@ -93,6 +96,12 @@ export async function createIntake(athleteId, body, docId = INTAKE_DOC_ID) {
     throw wrapped;
   }
   bump(INTAKE_KEY);
+  try {
+    const snap = await getDocFromServer(intakeRef(athleteId, docId));
+    if (snap.exists()) return { status: 'done', milestone: snap.data() };
+  } catch (err) {
+    // The tick is saved; without the read-back the screen dates it by the device clock.
+  }
   return { status: 'done' };
 }
 

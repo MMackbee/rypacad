@@ -307,3 +307,65 @@ test('forgetIntake makes the next open read that athlete again, and no other', a
   expect(adapter.fetchIntake).toHaveBeenLastCalledWith('a2');
   await again.unmount();
 });
+
+describe('round 8: a tick shows the stored mark, and a stale in-flight read is not cached', () => {
+  test('a tick whose read-back found the stored mark undoes against author AND server time', async () => {
+    const stored = { ...M, athleteId: 'a2', at: { toMillis: () => 7000 }, by: 'u-luke' };
+    adapter.createIntake.mockResolvedValue({ status: 'done', milestone: stored });
+    adapter.deleteIntake.mockResolvedValue();
+    const { result, unmount } = await mountHook(on(['a1', 'a2']));
+    await act(async () => { await result.current.tick('a2'); });
+    expect(result.current.data.byAthlete.a2).toBe(stored);
+    await act(async () => { await result.current.undo('a2'); });
+    expect(adapter.deleteIntake).toHaveBeenLastCalledWith('a2', undefined, { by: 'u-luke', at: stored.at, fromServer: true });
+    await unmount();
+  });
+
+  test('a read in flight when forgetIntake runs is read once more; the first load shows the second answer', async () => {
+    const fresh = { ...M, by: 'u-pat', byName: 'Pat' };
+    let release;
+    adapter.fetchIntake.mockReset();
+    adapter.fetchIntake
+      .mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve(null); }))
+      .mockResolvedValue(fresh);
+    const wait = async () => {
+      for (let i = 0; i < 20 && !release; i += 1) await act(async () => {});
+      forgetIntake('a1');
+      await act(async () => { release(); });
+      await settle();
+    };
+    const first = await mountHook(on(['a1']), wait);
+    expect(adapter.fetchIntake).toHaveBeenCalledTimes(2);
+    expect(first.result.current.data.byAthlete.a1).toEqual(fresh);
+    await first.unmount();
+    // The second answer was read with nothing moving, so it is cached.
+    const again = await mountHook(on(['a1']));
+    expect(adapter.fetchIntake).toHaveBeenCalledTimes(2);
+    expect(again.result.current.data.byAthlete.a1).toEqual(fresh);
+    await again.unmount();
+  });
+
+  test('when the athlete is touched during both reads, neither answer is cached', async () => {
+    const releases = [];
+    adapter.fetchIntake.mockReset();
+    adapter.fetchIntake.mockImplementation(() => new Promise((resolve) => { releases.push(() => resolve(null)); }));
+    const wait = async () => {
+      for (let i = 0; i < 20 && releases.length < 1; i += 1) await act(async () => {});
+      forgetIntake('a1');
+      await act(async () => { releases[0](); });
+      for (let i = 0; i < 20 && releases.length < 2; i += 1) await act(async () => {});
+      forgetIntake('a1');
+      await act(async () => { releases[1](); });
+      await settle();
+    };
+    const first = await mountHook(on(['a1']), wait);
+    expect(adapter.fetchIntake).toHaveBeenCalledTimes(2);
+    await first.unmount();
+    adapter.fetchIntake.mockReset();
+    adapter.fetchIntake.mockResolvedValue(M);
+    const again = await mountHook(on(['a1']));
+    expect(adapter.fetchIntake).toHaveBeenCalledTimes(1);
+    expect(again.result.current.data.byAthlete.a1).toEqual(M);
+    await again.unmount();
+  });
+});

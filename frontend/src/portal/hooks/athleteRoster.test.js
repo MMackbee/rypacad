@@ -10,8 +10,16 @@ jest.mock('../../firebase', () => ({ auth: { currentUser: { displayName: 'Pat Ow
 jest.mock('firebase/firestore', () => ({
   collection: (_db, ...path) => ({ path: path.join('/') }),
   // The cache answer a device gives offline for a collection it never read: empty, and it does not fail.
-  getDocs: async () => ({ docs: [], metadata: { fromCache: true } }),
+  getDocs: async () => { mockCached.push('getDocs'); return { docs: [], metadata: { fromCache: true } }; },
   getDocsFromServer: async (ref) => {
+    // The two whole-collection reads (server only), then one milestones read per athlete.
+    if (!ref.path.includes('/')) {
+      mockCalls.push(ref.path);
+      if (ref.path === 'athletes' && mockAthletesFail) throw Object.assign(new Error('offline'), { code: 'unavailable' });
+      if (ref.path === 'households' && mockHouseholdsFail) throw Object.assign(new Error('offline'), { code: 'unavailable' });
+      const rows = ref.path === 'athletes' ? mockAthletes : mockHouseholds;
+      return { docs: rows.map(({ id, ...data }) => ({ id, data: () => data })) };
+    }
     mockReads.push(ref.path);
     const id = ref.path.split('/')[1];
     if (mockFailing.has(id)) throw Object.assign(new Error('offline'), { code: 'unavailable' });
@@ -24,12 +32,9 @@ jest.mock('./live', () => ({
   __esModule: true,
   isLive: () => mockLive,
   fetchCurrentUser: async () => mockUser,
-  fetchAllAthletes: async () => {
-    mockCalls.push('athletes');
-    if (mockAthletesFail) throw Object.assign(new Error('offline'), { code: 'unavailable' });
-    return mockAthletes;
-  },
-  fetchAllHouseholds: async () => { mockCalls.push('households'); return mockHouseholds; },
+  // The cache-capable list fetchers: the roster must not use them (an offline device would get a short list).
+  fetchAllAthletes: async () => { mockCached.push('fetchAllAthletes'); return mockAthletes; },
+  fetchAllHouseholds: async () => { mockCached.push('fetchAllHouseholds'); return mockHouseholds; },
 }));
 jest.mock('./parallaxLive', () => ({
   ...jest.requireActual('./parallaxLive'),
@@ -69,6 +74,8 @@ let mockWrites;
 let mockCreateResult;
 let mockDeleteError;
 let mockAthletesFail;
+let mockHouseholdsFail;
+let mockCached;
 let mockStored;
 let mockExpected;
 let mockFetches;
@@ -92,6 +99,8 @@ beforeEach(() => {
   mockCreateResult = { status: 'done' };
   mockDeleteError = null;
   mockAthletesFail = false;
+  mockHouseholdsFail = false;
+  mockCached = [];
   mockStored = null;
   mockExpected = [];
   mockFetches = [];
@@ -393,5 +402,48 @@ describe("the attendance screen's cache follows the roster's Parallax writes (ca
     expect(mockFetches).toEqual([]);
     await again.unmount();
     await roster.unmount();
+  });
+});
+
+describe('the athlete and household lists come from the server only (card 14, round 8)', () => {
+  test('both lists arrive through the server-only read on a good load, and no cache-capable list read runs', async () => {
+    const { result, unmount } = await mount();
+    expect(mockCalls.sort()).toEqual(['athletes', 'households']);
+    expect(mockCached).toEqual([]);
+    expect(result.current.data.athletes.map((a) => a.id).sort()).toEqual(['a-kim', 'a-moss']);
+    expect(result.current.data.athletes.find((a) => a.id === 'a-kim')).toEqual({ id: 'a-kim', name: 'Dana Kim', householdId: 'h-kim' });
+    expect(result.current.data.households).toHaveLength(3);
+    await unmount();
+  });
+
+  test('offline: the athletes read rejects, so the screen error shows with no data (never an empty list), and nothing read from the cache', async () => {
+    mockAthletesFail = true;
+    const { result, unmount } = await mount();
+    expect(result.current.error).toBeTruthy();
+    expect(result.current.data).toBeNull();
+    expect(mockCached).toEqual([]);
+    await unmount();
+  });
+
+  test('offline: the households read rejecting fails the whole load too', async () => {
+    mockHouseholdsFail = true;
+    const { result, unmount } = await mount();
+    expect(result.current.error).toBeTruthy();
+    expect(result.current.data).toBeNull();
+    expect(mockCached).toEqual([]);
+    await unmount();
+  });
+});
+
+describe('a tick shows the stored mark when the read-back found it (card 14, round 8)', () => {
+  test('the undo of a read-back mark expects author AND server time; without one, the author alone', async () => {
+    const stored = { athleteId: 'a-moss', at: { toMillis: () => 5000 }, by: 'u-owner', byName: 'Pat' };
+    mockCreateResult = { status: 'done', milestone: stored };
+    const { result, unmount } = await mount();
+    await act(async () => { await result.current.tick('a-moss', 'fitnessAssessment'); });
+    expect(result.current.data.marks['a-moss'].fitnessAssessment).toBe(stored);
+    await act(async () => { await result.current.undo('a-moss', 'fitnessAssessment'); });
+    expect(mockExpected).toEqual([{ by: 'u-owner', at: stored.at, fromServer: true }]);
+    await unmount();
   });
 });
