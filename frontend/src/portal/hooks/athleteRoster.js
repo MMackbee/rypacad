@@ -127,7 +127,7 @@ export function useAthleteRoster() {
     const result = await createIntake(athleteId, body, docId);
     // The server's own time replaces this on the next open; until then the
     // device's clock dates the tick (and starts its ten-minute undo).
-    show(athleteId, docId, result.milestone ?? deviceStamped({ ...body, at: new Date() }));
+    show(athleteId, docId, result.milestone !== undefined ? result.milestone : deviceStamped({ ...body, at: new Date() }));
     wrote(athleteId, docId);
     return result.status;
   };

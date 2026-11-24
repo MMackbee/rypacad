@@ -447,3 +447,34 @@ describe('a tick shows the stored mark when the read-back found it (card 14, rou
     await unmount();
   });
 });
+
+describe('round 9: no undo without a server-verified mark', () => {
+  const changed = (stored) => Object.assign(new LiveDataError(ERR.UNKNOWN, 'changed', null, MARK_CHANGED), { stored });
+
+  test('a tick whose read-back failed: the first undo rejects and shows the stored mark; the second expects author AND server time', async () => {
+    mockCreateResult = { status: 'done' };
+    const { result, unmount } = await mount();
+    await act(async () => { await result.current.tick('a-moss', 'fitnessAssessment'); });
+    const stored = { athleteId: 'a-moss', at: { toMillis: () => 9000 }, by: 'u-owner', byName: 'Pat' };
+    mockDeleteError = changed(stored);
+    let thrown;
+    await act(async () => { try { await result.current.undo('a-moss', 'fitnessAssessment'); } catch (err) { thrown = err; } });
+    expect(thrown).toBeTruthy();
+    expect(mockExpected[0]).toEqual({ by: 'u-owner', fromServer: false });
+    expect(result.current.data.marks['a-moss'].fitnessAssessment).toBe(stored);
+    mockDeleteError = null;
+    await act(async () => { await result.current.undo('a-moss', 'fitnessAssessment'); });
+    expect(mockExpected[1]).toEqual({ by: 'u-owner', at: stored.at, fromServer: true });
+    await unmount();
+  });
+
+  test('a tick whose read-back says the mark is gone shows as not done, with no error', async () => {
+    mockCreateResult = { status: 'done', milestone: null };
+    const { result, unmount } = await mount();
+    let answer;
+    await act(async () => { answer = await result.current.tick('a-moss', 'fitnessAssessment'); });
+    expect(answer).toBe('done');
+    expect(result.current.data.marks['a-moss'].fitnessAssessment).toBeNull();
+    await unmount();
+  });
+});

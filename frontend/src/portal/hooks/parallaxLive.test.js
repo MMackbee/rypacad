@@ -89,14 +89,32 @@ describe('an undo or clear deletes only the mark the screen showed (card 14, rou
     expect(tx.delete).not.toHaveBeenCalled();
   });
 
-  test('a mark this screen ticked itself carries the device time: the author alone decides', async () => {
+  test('a mark this screen ticked itself (device time) is never deleted on the author alone (round 9)', async () => {
     const mine = deviceStamped({ athleteId: 'a1', at: new Date(123), by: 'u-luke', byName: 'Luke' });
-    stored = READ('u-luke', 99999);
-    await deleteIntake('a1', undefined, expectedMark(mine));
-    expect(tx.delete).toHaveBeenCalledTimes(1);
-    tx.delete.mockClear();
-    stored = READ('u-sam', 99999);
-    await expect(deleteIntake('a1', undefined, expectedMark(mine))).rejects.toMatchObject({ reason: MARK_CHANGED });
+    const { getDocFromServer } = jest.requireMock('firebase/firestore');
+    // A mark by the same author is stored (re-marked elsewhere): nothing is deleted, it comes back as changed.
+    const theirs = READ('u-luke', 99999);
+    getDocFromServer.mockResolvedValueOnce({ exists: () => true, data: () => theirs });
+    const err = await deleteIntake('a1', undefined, expectedMark(mine)).catch((e) => e);
+    expect(err.reason).toBe(MARK_CHANGED);
+    expect(err.stored).toEqual(theirs);
+    expect(runTransaction).not.toHaveBeenCalled();
+    expect(tx.delete).not.toHaveBeenCalled();
+    // The server cannot be read: nothing is deleted and the call fails.
+    getDocFromServer.mockRejectedValueOnce({ code: 'unavailable' });
+    await expect(deleteIntake('a1', undefined, expectedMark(mine))).rejects.toMatchObject({ code: ERR.UNAVAILABLE });
+    expect(tx.delete).not.toHaveBeenCalled();
+    // The server says the document is gone: a completed undo, nothing to delete.
+    getDocFromServer.mockResolvedValueOnce({ exists: () => false });
+    await expect(deleteIntake('a1', undefined, expectedMark(mine))).resolves.toBeUndefined();
+    expect(tx.delete).not.toHaveBeenCalled();
+  });
+
+  test('an author-only expected mark can delete nothing, on any path', async () => {
+    stored = READ('u-luke', 1000);
+    await expect(deleteIntake('a1', undefined, { by: 'u-luke' })).rejects.toMatchObject({ reason: MARK_CHANGED });
+    jest.requireMock('firebase/firestore').getDocFromServer.mockResolvedValue({ exists: () => true, data: () => stored });
+    await expect(deleteIntake('a1', undefined, { by: 'u-luke', fromServer: false })).rejects.toMatchObject({ reason: MARK_CHANGED });
     expect(tx.delete).not.toHaveBeenCalled();
   });
 
@@ -173,11 +191,11 @@ describe('a tick reads itself back from the server (card 14, round 8)', () => {
     expect(getDoc).not.toHaveBeenCalled();
   });
 
-  test('a read-back that rejects or finds nothing is still plain done', async () => {
+  test('a read-back that rejects is plain done (no milestone key); one the server says is gone is milestone null', async () => {
     setDoc.mockResolvedValue();
     getDocFromServer.mockRejectedValueOnce({ code: 'unavailable' });
     expect(await createIntake('a1', BODY)).toEqual({ status: 'done' });
     getDocFromServer.mockResolvedValueOnce({ exists: () => false });
-    expect(await createIntake('a1', BODY)).toEqual({ status: 'done' });
+    expect(await createIntake('a1', BODY)).toEqual({ status: 'done', milestone: null });
   });
 });

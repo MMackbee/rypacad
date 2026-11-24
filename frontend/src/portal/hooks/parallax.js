@@ -5,8 +5,10 @@
  * lifetime, so the next block's roster costs no read for athletes already
  * seen. An entry read more than INTAKE_UNDO_MS ago is read again on the next
  * mount, so an owner's clear reaches other coaches' open screens within ten
- * minutes (plan, Decided here 15). A read that was out when a write or forgetIntake touched
- * that athlete is read once more and its stale answer is never cached. A failed read is never cached, and the
+ * minutes (plan, Decided here 15). A write or forgetIntake that touches an athlete after its
+ * answer was taken (a read, or the fresh cache) sends that athlete back for another read before the
+ * load answers (at most three passes in all); an answer is cached only when nothing touched the
+ * athlete during its own read. A failed read is never cached, and the
  * next account on the same device starts from an empty cache (2026-11-11 review).
  *
  * Never imports hooks/index.js or hooks/useAuthSession.js (screen tests mock
@@ -61,20 +63,29 @@ async function loadIntakes(ids) {
     cacheUid = user.uid;
   }
   const now = Date.now();
+  // answers: what each athlete shows; taken: the athlete's write counter when its answer was taken.
   const answers = new Map();
-  await Promise.all(ids.filter((id) => !isFresh(cache.get(id), now)).map(async (id) => {
-    // A write or forget that lands while the read is out makes its answer stale: read once more, and
-    // cache an answer only when nothing moved during its own read. The last answer is what this load shows.
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const before = writeCount(id);
-      const milestone = await fetchIntake(id);
-      answers.set(id, milestone);
-      if (writeCount(id) === before) {
-        cache.set(id, { milestone, readAt: Date.now() });
-        break;
-      }
-    }
-  }));
+  const taken = new Map();
+  const readOne = async (id) => {
+    const before = writeCount(id);
+    const milestone = await fetchIntake(id);
+    answers.set(id, milestone);
+    taken.set(id, before);
+    // Cached only when nothing touched the athlete during this read.
+    if (writeCount(id) === before) cache.set(id, { milestone, readAt: Date.now() });
+  };
+  ids.filter((id) => isFresh(cache.get(id), now)).forEach((id) => {
+    answers.set(id, cache.get(id).milestone);
+    taken.set(id, writeCount(id));
+  });
+  await Promise.all(ids.filter((id) => !answers.has(id)).map(readOne));
+  // A write or forget that touched an athlete after its answer was taken makes that answer stale, whether
+  // it came from a read or from the cache: read those athletes again, in at most two more passes.
+  for (let pass = 1; pass < 3; pass += 1) {
+    const stale = ids.filter((id) => writeCount(id) !== taken.get(id));
+    if (!stale.length) break;
+    await Promise.all(stale.map(readOne));
+  }
   return {
     byAthlete: Object.fromEntries(ids.map((id) => [id, answers.has(id) ? answers.get(id) : cache.get(id)?.milestone ?? null])),
     viewer: {
@@ -124,7 +135,7 @@ export function useParallaxIntakes(athleteIds, { enabled = false } = {}) {
     const result = await createIntake(athleteId, body);
     // The server's own time replaces this on the next read; until then the
     // device's clock dates the tick (and starts its ten-minute undo).
-    remember(athleteId, result.milestone ?? deviceStamped({ ...body, at: new Date() }));
+    remember(athleteId, result.milestone !== undefined ? result.milestone : deviceStamped({ ...body, at: new Date() }));
     return result.status;
   };
 

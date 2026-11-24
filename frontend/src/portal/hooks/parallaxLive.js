@@ -8,9 +8,11 @@
  * optional doc id, default parallaxIntake, so every existing caller is unchanged.
  *
  * A tick is a plain setDoc of the four keys data/combine.js intakeDoc builds,
- * then a server-only read-back of the stored mark (getDocFromServer), so the
- * screen can show the mark with the server's time and an undo can match it on
- * author and time. A read-back that fails never turns the saved tick into an error.
+ * then a server-only read-back of the stored mark (getDocFromServer): the stored
+ * mark (shown with the server's time), `milestone: null` when the server says the
+ * document is gone (shown as not done), or no `milestone` key when the read-back
+ * fails (the device-stamped mark shows, and its undo is verified against the server
+ * first). A read-back that fails never turns the saved tick into an error.
  * When another coach ticked first, the rules see the second write as an
  * update and refuse it: the refusal is re-read, and a tick that is there
  * answers `{ status: 'already', milestone }` (Review Focus 4), so the screen
@@ -18,7 +20,10 @@
  *
  * An undo or clear deletes only the mark the screen showed (hq card 14, round 6):
  * deleteIntake takes that mark as `expected` and checks it against the stored
- * one inside a transaction, so a tap never erases a replacement it did not see.
+ * one inside a transaction, on author and server time, so a tap never erases a
+ * replacement it did not see. A mark with only the device's time (just ticked here,
+ * no read-back) is never deleted on the author alone: it is read from the server
+ * first, and what is stored comes back as a changed mark to be shown.
  */
 import { doc, getDoc, getDocFromServer, runTransaction, serverTimestamp, setDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
@@ -52,8 +57,13 @@ export function expectedMark(milestone) {
 
 const millis = (t) => (t && typeof t.toMillis === 'function' ? t.toMillis() : t instanceof Date ? t.getTime() : NaN);
 function isShownMark(stored, expected) {
-  if (!expected || stored.by !== expected.by) return false;
-  return !expected.fromServer || millis(stored.at) === millis(expected.at);
+  return Boolean(expected && expected.fromServer) && stored.by === expected.by && millis(stored.at) === millis(expected.at);
+}
+
+function changedMark(stored) {
+  const err = new LiveDataError(ERR.UNKNOWN, 'deleteIntake: the mark has changed since it was shown.', null, MARK_CHANGED);
+  err.stored = stored;
+  return err;
 }
 
 const intakeRef = (athleteId, docId) => doc(db, 'athletes', athleteId, INTAKE_KEY, docId);
@@ -78,7 +88,7 @@ export async function fetchIntake(athleteId, docId = INTAKE_DOC_ID) {
   }
 }
 
-/** Tick: `{ status: 'done', milestone? }` (the stored mark, when the read-back found it), or `{ status: 'already', milestone }` when someone ticked first. */
+/** Tick: `{ status: 'done', milestone? }` (milestone: the stored mark, null when the server says it is gone, absent when the read-back failed), or `{ status: 'already', milestone }` when someone ticked first. */
 export async function createIntake(athleteId, body, docId = INTAKE_DOC_ID) {
   requireAthlete(athleteId, 'createIntake');
   requireUser();
@@ -98,7 +108,7 @@ export async function createIntake(athleteId, body, docId = INTAKE_DOC_ID) {
   bump(INTAKE_KEY);
   try {
     const snap = await getDocFromServer(intakeRef(athleteId, docId));
-    if (snap.exists()) return { status: 'done', milestone: snap.data() };
+    return { status: 'done', milestone: snap.exists() ? snap.data() : null };
   } catch (err) {
     // The tick is saved; without the read-back the screen dates it by the device clock.
   }
@@ -116,6 +126,18 @@ export async function deleteIntake(athleteId, docId = INTAKE_DOC_ID, expected) {
   requireAthlete(athleteId, 'deleteIntake');
   requireUser();
   if (expected === undefined) throw new LiveDataError(ERR.INVALID, 'deleteIntake: the mark on screen is required.');
+  if (expected && expected.fromServer === false) {
+    // The screen holds a mark with the device's time only: never delete on the author alone.
+    let snap;
+    try {
+      snap = await getDocFromServer(intakeRef(athleteId, docId));
+    } catch (err) {
+      throw wrap(err, 'deleteIntake');
+    }
+    if (snap.exists()) throw changedMark(snap.data());
+    bump(INTAKE_KEY);
+    return;
+  }
   let stored;
   try {
     const ref = intakeRef(athleteId, docId);
@@ -128,10 +150,6 @@ export async function deleteIntake(athleteId, docId = INTAKE_DOC_ID, expected) {
   } catch (err) {
     throw wrap(err, 'deleteIntake');
   }
-  if (stored.changed) {
-    const err = new LiveDataError(ERR.UNKNOWN, 'deleteIntake: the mark has changed since it was shown.', null, MARK_CHANGED);
-    err.stored = stored.changed;
-    throw err;
-  }
+  if (stored.changed) throw changedMark(stored.changed);
   bump(INTAKE_KEY);
 }
