@@ -316,10 +316,10 @@ describe('a marks read that never reached the server is "didn\'t load", never "n
 });
 
 describe("the attendance screen's cache follows the roster's Parallax writes (card 14, round 6)", () => {
-  const attendance = () => useParallaxIntakes(['a-kim', 'a-moss'], { enabled: true });
+  const useAttendance = () => useParallaxIntakes(['a-kim', 'a-moss'], { enabled: true });
 
   async function loadAttendanceThenRoster() {
-    const first = await mount(attendance);
+    const first = await mount(useAttendance);
     await first.unmount();
     return mount();
   }
@@ -331,7 +331,7 @@ describe("the attendance screen's cache follows the roster's Parallax writes (ca
     await act(async () => { await roster.result.current.tick('a-moss', 'parallaxIntake'); });
     mockStored = MARK('Pat');
     mockFetches = [];
-    const again = await mount(attendance);
+    const again = await mount(useAttendance);
     expect(mockFetches).toEqual(['a-moss']);
     expect(again.result.current.data.byAthlete['a-moss']).toEqual(MARK('Pat'));
     await again.unmount();
@@ -344,7 +344,7 @@ describe("the attendance screen's cache follows the roster's Parallax writes (ca
     mockStored = null;
     await act(async () => { await roster.result.current.undo('a-kim', 'parallaxIntake'); });
     mockFetches = [];
-    const again = await mount(attendance);
+    const again = await mount(useAttendance);
     expect(mockFetches).toEqual(['a-kim']);
     expect(again.result.current.data.byAthlete['a-kim']).toBeNull();
     await again.unmount();
@@ -357,14 +357,14 @@ describe("the attendance screen's cache follows the roster's Parallax writes (ca
     mockCreateResult = { status: 'already', milestone: MARK('Sam') };
     await act(async () => { await roster.result.current.tick('a-moss', 'parallaxIntake'); });
     mockFetches = [];
-    let again = await mount(attendance);
+    let again = await mount(useAttendance);
     expect(mockFetches).toEqual(['a-moss']);
     await again.unmount();
     mockDeleteError = Object.assign(new Error('no'), { code: ERR.PERMISSION });
     mockStored = MARK('Sam');
     await act(async () => { try { await roster.result.current.undo('a-kim', 'parallaxIntake'); } catch (err) { /* the refusal stands */ } });
     mockFetches = [];
-    again = await mount(attendance);
+    again = await mount(useAttendance);
     expect(mockFetches).toEqual(['a-kim']);
     await again.unmount();
     await roster.unmount();
@@ -375,7 +375,7 @@ describe("the attendance screen's cache follows the roster's Parallax writes (ca
     const roster = await loadAttendanceThenRoster();
     await act(async () => { await roster.result.current.tick('a-moss', 'fitnessAssessment'); });
     mockFetches = [];
-    const again = await mount(attendance);
+    const again = await mount(useAttendance);
     expect(mockFetches).toEqual([]);
     await again.unmount();
     await roster.unmount();
