@@ -8,7 +8,10 @@
  * minutes (plan, Decided here 15). A write or forgetIntake that touches an athlete after its
  * answer was taken (a read, or the fresh cache) sends that athlete back for another read before the
  * load answers (at most three passes in all); an answer is cached only when nothing touched the
- * athlete during its own read. A failed read is never cached, and the
+ * athlete during its own read.
+ * A mounted screen is also told when one of its athletes is touched by anyone but itself (the roster's
+ * write landing, which can come at any time, even after the list is on screen) and reads that athlete
+ * again, showing it through its override. A failed read is never cached, and the
  * next account on the same device starts from an empty cache (2026-11-11 review).
  *
  * Never imports hooks/index.js or hooks/useAuthSession.js (screen tests mock
@@ -18,7 +21,7 @@
  * loaded data (and updates the cache), so no reload blanks the roster's ticks.
  * Seed mode (isLive() false): r1 and r4 of the demo roster are ticked by Luke.
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import useSeedResource from './useSeedResource';
 import { ERR, LiveDataError, fetchCurrentUser, isLive } from './live';
 import { auth } from '../../firebase';
@@ -39,6 +42,7 @@ let seed = freshSeed();
 /** Empties the live cache and puts the seed ticks back (tests). */
 export function clearIntakeCache() {
   cache.clear();
+  listeners.clear();
   cacheUid = null;
   seed = freshSeed();
 }
@@ -51,7 +55,13 @@ export function forgetIntake(athleteId) {
 
 /** athleteId -> how many times a write or a forget has touched that athlete's entry: a read that started before one is stale. */
 const writes = new Map();
-const moved = (athleteId) => writes.set(athleteId, (writes.get(athleteId) || 0) + 1);
+/** Mounted attendance hooks: (athleteId, causedBy) => void, told whenever an athlete's entry is touched. */
+const listeners = new Set();
+/** `causedBy` is the hook whose own tick or undo it was (it already shows that answer), or null (the roster, a forget). */
+function moved(athleteId, causedBy = null) {
+  writes.set(athleteId, (writes.get(athleteId) || 0) + 1);
+  listeners.forEach((listen) => listen(athleteId, causedBy));
+}
 const writeCount = (athleteId) => writes.get(athleteId) || 0;
 
 const isFresh = (entry, now) => Boolean(entry) && now - entry.readAt <= INTAKE_UNDO_MS;
@@ -88,6 +98,8 @@ async function loadIntakes(ids) {
   }
   return {
     byAthlete: Object.fromEntries(ids.map((id) => [id, answers.has(id) ? answers.get(id) : cache.get(id)?.milestone ?? null])),
+    // The write counter each answer was taken at: the hook checks it when it subscribes (no gap).
+    counters: Object.fromEntries(ids.map((id) => [id, taken.get(id)])),
     viewer: {
       uid: user.uid,
       role: user.role,
@@ -116,11 +128,61 @@ export function useParallaxIntakes(athleteIds, { enabled = false } = {}) {
   const [overrides, setOverrides] = useState({});
 
   const show = (athleteId, milestone) => setOverrides((o) => ({ ...o, [athleteId]: milestone }));
+  const self = useRef({});
   const remember = (athleteId, milestone) => {
-    moved(athleteId);
+    moved(athleteId, self.current);
     cache.set(athleteId, { milestone, readAt: Date.now() });
     show(athleteId, milestone);
   };
+
+  // While mounted with its answers, the hook is told when one of its athletes is touched by anyone else
+  // (the roster's write landing, a forget) and reads that athlete again, showing the answer through its
+  // override: no blank, no other row reloads. On subscribing it first checks the athletes whose counter
+  // moved since their answer was taken, so no write falls between the load and the subscription.
+  const idsKey = ids.join(',');
+  const counters = state.data?.counters;
+  useEffect(() => {
+    if (!live || !counters) return undefined;
+    const mine = new Set(idsKey.split(',').filter(Boolean));
+    const me = self.current;
+    const running = new Set();
+    let active = true;
+    const refresh = async (id) => {
+      running.add(id);
+      try {
+        // Up to three reads in a row; an answer overtaken during its own read is neither cached nor shown.
+        for (let n = 0; n < 3 && active; n += 1) {
+          const before = writeCount(id);
+          let milestone;
+          try {
+            milestone = await fetchIntake(id);
+          } catch (err) {
+            cache.delete(id); // a failed read leaves what is shown, and the next open reads it
+            return;
+          }
+          if (!active) return;
+          if (writeCount(id) === before) {
+            cache.set(id, { milestone, readAt: Date.now() });
+            setOverrides((o) => ({ ...o, [id]: milestone }));
+            return;
+          }
+        }
+        cache.delete(id);
+      } finally {
+        running.delete(id);
+      }
+    };
+    const touched = (id, causedBy) => {
+      if (causedBy === me || !mine.has(id) || running.has(id)) return;
+      refresh(id);
+    };
+    listeners.add(touched);
+    mine.forEach((id) => { if (writeCount(id) !== counters[id]) touched(id, null); });
+    return () => {
+      active = false;
+      listeners.delete(touched);
+    };
+  }, [live, counters, idsKey]);
 
   const tick = async (athleteId) => {
     if (!liveMode) {
