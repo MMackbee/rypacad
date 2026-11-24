@@ -7,22 +7,26 @@
  *
  * Reads: all athletes and all households (the fetches the admin dashboard
  * uses), then ONE getDocs of athletes/{id}/milestones per real athlete, in
- * parallel. No collection-group query, no listener, no polling, and no
+ * parallel, from the server only (getDocsFromServer): an offline device must not answer
+ * from its cache, which is empty for an athlete it never read and would read as "not done".
+ * No collection-group query, no listener, no polling, and no
  * re-read after a tick: the row shows the write through a component-state
  * override. A failed read on one athlete leaves that athlete without marks
  * (`marks[id]` absent), never the list blank. Only `retry`, after a failed
  * first load, reads again.
  *
- * Writes are hooks/parallaxLive.js's, with the mark's doc id (the attendance
- * screen's hooks/parallax.js is not touched, so each keeps its own cache).
+ * Writes are hooks/parallaxLive.js's, with the mark's doc id. An undo or clear passes the
+ * mark the screen shows, and deletes only that. The attendance screen's hooks/parallax.js
+ * keeps its own per-athlete cache; every Parallax-intake write here forgets that athlete's entry.
  * Seed mode (isLive() false): the seed's athletes, no network call, ticks in memory.
  */
 import { useState } from 'react';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocsFromServer } from 'firebase/firestore';
 import { auth, db } from '../../firebase';
 import useSeedResource from './useSeedResource';
 import { ERR, LiveDataError, fetchAllAthletes, fetchAllHouseholds, fetchCurrentUser, isLive, wrap } from './live';
-import { INTAKE_KEY, createIntake, deleteIntake, fetchIntake, intakeStamp } from './parallaxLive';
+import { INTAKE_KEY, MARK_CHANGED, createIntake, deleteIntake, deviceStamped, expectedMark, fetchIntake, intakeStamp } from './parallaxLive';
+import { forgetIntake } from './parallax';
 import { FITNESS_DOC_ID, INTAKE_DOC_ID, intakeByName, intakeDoc } from '../data/combine';
 import { withoutTestFamilies } from '../data/testFamily';
 import { HOUSEHOLD } from '../data/seed';
@@ -32,7 +36,7 @@ const MARK_IDS = [INTAKE_DOC_ID, FITNESS_DOC_ID];
 /** One athlete's milestone docs as { parallaxIntake, fitnessAssessment }, each the mark or null. */
 async function fetchMarks(athleteId) {
   try {
-    const snap = await getDocs(collection(db, 'athletes', athleteId, INTAKE_KEY));
+    const snap = await getDocsFromServer(collection(db, 'athletes', athleteId, INTAKE_KEY));
     const byId = new Map(snap.docs.map((d) => [d.id, d.data()]));
     return Object.fromEntries(MARK_IDS.map((id) => [id, byId.get(id) ?? null]));
   } catch (err) {
@@ -89,6 +93,15 @@ export function useAthleteRoster() {
   const state = useSeedResource(liveMode ? null : SEED, liveMode ? { source: loadRoster, deps: ['athlete-roster', attempt] } : undefined);
 
   const show = (athleteId, docId, milestone) => setOverrides((o) => ({ ...o, [`${athleteId}/${docId}`]: milestone }));
+  // The mark this screen shows for one athlete's doc: what an undo or clear must find stored.
+  const shown = (athleteId, docId) => {
+    const key = `${athleteId}/${docId}`;
+    return Object.prototype.hasOwnProperty.call(overrides, key) ? overrides[key] : state.data?.marks?.[athleteId]?.[docId];
+  };
+  // A Parallax-intake write is also what the attendance screen's cache holds for that athlete: forget it.
+  const wrote = (athleteId, docId) => {
+    if (docId === INTAKE_DOC_ID) forgetIntake(athleteId);
+  };
 
   const tick = async (athleteId, docId) => {
     if (!liveMode) {
@@ -101,7 +114,8 @@ export function useAthleteRoster() {
     const result = await createIntake(athleteId, body, docId);
     // The server's own time replaces this on the next open; until then the
     // device's clock dates the tick (and starts its ten-minute undo).
-    show(athleteId, docId, result.status === 'already' ? result.milestone : { ...body, at: new Date() });
+    show(athleteId, docId, result.status === 'already' ? result.milestone : deviceStamped({ ...body, at: new Date() }));
+    wrote(athleteId, docId);
     return result.status;
   };
 
@@ -110,9 +124,16 @@ export function useAthleteRoster() {
       show(athleteId, docId, null);
       return;
     }
+    // Only the mark this screen shows is deleted; a different one stored there is shown instead and the save fails.
+    const onScreen = expectedMark(shown(athleteId, docId));
     try {
-      await deleteIntake(athleteId, docId);
+      await deleteIntake(athleteId, docId, onScreen);
     } catch (err) {
+      if (err?.reason === MARK_CHANGED) {
+        show(athleteId, docId, err.stored);
+        wrote(athleteId, docId);
+        throw err;
+      }
       // A refusal may mean the mark is already gone (cleared on another
       // device): read it again. Gone is what undo wanted; a mark still there
       // shows as stored and the refusal stands (hooks/parallax.js, same rule).
@@ -120,10 +141,12 @@ export function useAthleteRoster() {
       const stored = await fetchIntake(athleteId, docId).catch(() => undefined);
       if (stored === undefined) throw err;
       show(athleteId, docId, stored);
+      wrote(athleteId, docId);
       if (stored) throw err;
       return;
     }
     show(athleteId, docId, null);
+    wrote(athleteId, docId);
   };
 
   let data = state.data;

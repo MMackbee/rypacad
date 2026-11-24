@@ -9,7 +9,9 @@ import { createRoot } from 'react-dom/client';
 jest.mock('../../firebase', () => ({ auth: { currentUser: { displayName: 'Pat Owner' } }, db: {} }));
 jest.mock('firebase/firestore', () => ({
   collection: (_db, ...path) => ({ path: path.join('/') }),
-  getDocs: async (ref) => {
+  // The cache answer a device gives offline for a collection it never read: empty, and it does not fail.
+  getDocs: async () => ({ docs: [], metadata: { fromCache: true } }),
+  getDocsFromServer: async (ref) => {
     mockReads.push(ref.path);
     const id = ref.path.split('/')[1];
     if (mockFailing.has(id)) throw Object.assign(new Error('offline'), { code: 'unavailable' });
@@ -30,24 +32,30 @@ jest.mock('./live', () => ({
   fetchAllHouseholds: async () => { mockCalls.push('households'); return mockHouseholds; },
 }));
 jest.mock('./parallaxLive', () => ({
+  ...jest.requireActual('./parallaxLive'),
+  __esModule: true,
   INTAKE_KEY: 'milestones',
   intakeStamp: () => 'NOW',
   createIntake: async (athleteId, body, docId) => {
     mockWrites.push(['create', athleteId, body, docId]);
     return mockCreateResult;
   },
-  deleteIntake: async (athleteId, docId) => {
+  deleteIntake: async (athleteId, docId, expected) => {
     mockWrites.push(['delete', athleteId, docId]);
+    mockExpected.push(expected);
     if (mockDeleteError) throw mockDeleteError;
   },
   fetchIntake: async (athleteId, docId) => {
     mockWrites.push(['fetch', athleteId, docId]);
+    mockFetches.push(athleteId);
     return mockStored;
   },
 }));
 
-import { ERR } from './live';
+import { ERR, LiveDataError } from './live';
+import { MARK_CHANGED } from './parallaxLive';
 import { useAthleteRoster } from './athleteRoster';
+import { clearIntakeCache, useParallaxIntakes } from './parallax';
 
 let mockLive;
 let mockUser;
@@ -62,6 +70,8 @@ let mockCreateResult;
 let mockDeleteError;
 let mockAthletesFail;
 let mockStored;
+let mockExpected;
+let mockFetches;
 
 const MARK = (byName = 'Luke') => ({ athleteId: 'a-kim', at: new Date('2026-11-12T22:00:00Z'), by: 'u-luke', byName });
 
@@ -83,13 +93,16 @@ beforeEach(() => {
   mockDeleteError = null;
   mockAthletesFail = false;
   mockStored = null;
+  mockExpected = [];
+  mockFetches = [];
+  clearIntakeCache();
 });
 
 const flush = async () => { for (let i = 0; i < 12; i += 1) await act(async () => {}); };
-async function mount() {
+async function mount(useHook = useAthleteRoster) {
   const result = { current: null };
   function Probe() {
-    result.current = useAthleteRoster();
+    result.current = useHook();
     return null;
   }
   const root = createRoot(document.createElement('div'));
@@ -247,4 +260,124 @@ test('seed mode: the seed athletes, no network call, ticks work in memory', asyn
   expect(result.current.data.marks[id].fitnessAssessment).toBeNull();
   expect(mockWrites).toEqual([]);
   await unmount();
+});
+
+describe('an undo or clear deletes only the mark the roster showed (card 14, round 6)', () => {
+  const changed = (stored) => Object.assign(new LiveDataError(ERR.UNKNOWN, 'changed', null, MARK_CHANGED), { stored });
+
+  test('a mark that came from a read is passed as expected with its author and server time', async () => {
+    const { result, unmount } = await mount();
+    await act(async () => { await result.current.undo('a-kim', 'parallaxIntake'); });
+    expect(mockExpected).toEqual([{ by: 'u-luke', at: MARK().at, fromServer: true }]);
+    await unmount();
+  });
+
+  test("a mark this screen ticked is passed as expected by its author alone (the device time is not the server's)", async () => {
+    const { result, unmount } = await mount();
+    await act(async () => { await result.current.tick('a-moss', 'fitnessAssessment'); });
+    await act(async () => { await result.current.undo('a-moss', 'fitnessAssessment'); });
+    expect(mockExpected).toEqual([{ by: 'u-owner', fromServer: false }]);
+    await unmount();
+  });
+
+  test('another device replaced the mark: the stored one shows, nothing else, and the failure is not the ten-minutes one', async () => {
+    const { result, unmount } = await mount();
+    mockDeleteError = changed(MARK('Sam'));
+    let thrown;
+    await act(async () => { try { await result.current.undo('a-kim', 'parallaxIntake'); } catch (err) { thrown = err; } });
+    expect(thrown).toBeTruthy();
+    expect(thrown.code).not.toBe(ERR.PERMISSION);
+    expect(result.current.data.marks['a-kim'].parallaxIntake).toEqual(MARK('Sam'));
+    // The next tap goes the normal way for the mark now shown, expecting that one.
+    mockDeleteError = null;
+    await act(async () => { await result.current.undo('a-kim', 'parallaxIntake'); });
+    expect(mockExpected[1]).toEqual({ by: 'u-luke', at: MARK('Sam').at, fromServer: true });
+    expect(result.current.data.marks['a-kim'].parallaxIntake).toBeNull();
+    await unmount();
+  });
+
+  test('an undo with no mark shown asks for nothing to be deleted (expected null), never a bare delete', async () => {
+    const { result, unmount } = await mount();
+    await act(async () => { await result.current.undo('a-moss', 'parallaxIntake'); });
+    expect(mockExpected).toEqual([null]);
+    await unmount();
+  });
+});
+
+describe('a marks read that never reached the server is "didn\'t load", never "not done" (card 14, round 6)', () => {
+  test('offline: the cache has nothing for that athlete, so it has no marks, and every read asks the server', async () => {
+    mockFailing = new Set(['a-moss']);
+    const { result, unmount } = await mount();
+    expect(result.current.data.marks['a-moss']).toBeUndefined();
+    expect(result.current.data.marks['a-kim']).toEqual({ parallaxIntake: MARK(), fitnessAssessment: null });
+    expect(mockReads.sort()).toEqual(['athletes/a-kim/milestones', 'athletes/a-moss/milestones']);
+    await unmount();
+  });
+});
+
+describe("the attendance screen's cache follows the roster's Parallax writes (card 14, round 6)", () => {
+  const attendance = () => useParallaxIntakes(['a-kim', 'a-moss'], { enabled: true });
+
+  async function loadAttendanceThenRoster() {
+    const first = await mount(attendance);
+    await first.unmount();
+    return mount();
+  }
+
+  test('a roster tick: attendance, opened again inside ten minutes, reads that athlete again and shows the tick', async () => {
+    mockStored = null;
+    const roster = await loadAttendanceThenRoster();
+    expect(mockFetches.sort()).toEqual(['a-kim', 'a-moss']);
+    await act(async () => { await roster.result.current.tick('a-moss', 'parallaxIntake'); });
+    mockStored = MARK('Pat');
+    mockFetches = [];
+    const again = await mount(attendance);
+    expect(mockFetches).toEqual(['a-moss']);
+    expect(again.result.current.data.byAthlete['a-moss']).toEqual(MARK('Pat'));
+    await again.unmount();
+    await roster.unmount();
+  });
+
+  test('a roster undo: attendance reads that athlete again and shows no tick', async () => {
+    mockStored = MARK();
+    const roster = await loadAttendanceThenRoster();
+    mockStored = null;
+    await act(async () => { await roster.result.current.undo('a-kim', 'parallaxIntake'); });
+    mockFetches = [];
+    const again = await mount(attendance);
+    expect(mockFetches).toEqual(['a-kim']);
+    expect(again.result.current.data.byAthlete['a-kim']).toBeNull();
+    await again.unmount();
+    await roster.unmount();
+  });
+
+  test("a tick that lost the race ('already') and a refused undo's re-read both reach attendance too", async () => {
+    mockStored = null;
+    const roster = await loadAttendanceThenRoster();
+    mockCreateResult = { status: 'already', milestone: MARK('Sam') };
+    await act(async () => { await roster.result.current.tick('a-moss', 'parallaxIntake'); });
+    mockFetches = [];
+    let again = await mount(attendance);
+    expect(mockFetches).toEqual(['a-moss']);
+    await again.unmount();
+    mockDeleteError = Object.assign(new Error('no'), { code: ERR.PERMISSION });
+    mockStored = MARK('Sam');
+    await act(async () => { try { await roster.result.current.undo('a-kim', 'parallaxIntake'); } catch (err) { /* the refusal stands */ } });
+    mockFetches = [];
+    again = await mount(attendance);
+    expect(mockFetches).toEqual(['a-kim']);
+    await again.unmount();
+    await roster.unmount();
+  });
+
+  test('a fitness write does not touch it (attendance has no fitness mark)', async () => {
+    mockStored = null;
+    const roster = await loadAttendanceThenRoster();
+    await act(async () => { await roster.result.current.tick('a-moss', 'fitnessAssessment'); });
+    mockFetches = [];
+    const again = await mount(attendance);
+    expect(mockFetches).toEqual([]);
+    await again.unmount();
+    await roster.unmount();
+  });
 });

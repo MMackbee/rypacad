@@ -19,7 +19,7 @@ import { useState } from 'react';
 import useSeedResource from './useSeedResource';
 import { ERR, LiveDataError, fetchCurrentUser, isLive } from './live';
 import { auth } from '../../firebase';
-import { createIntake, deleteIntake, fetchIntake, intakeStamp } from './parallaxLive';
+import { MARK_CHANGED, createIntake, deleteIntake, deviceStamped, expectedMark, fetchIntake, intakeStamp } from './parallaxLive';
 import { INTAKE_UNDO_MS, intakeByName, intakeDoc } from '../data/combine';
 
 /** athleteId -> { milestone: milestone|null, readAt: ms }: successful reads and this app's own writes only. */
@@ -38,6 +38,11 @@ export function clearIntakeCache() {
   cache.clear();
   cacheUid = null;
   seed = freshSeed();
+}
+
+/** Forgets one athlete's entry, so the next screen open reads it again (the roster calls this after it writes that athlete's tick). */
+export function forgetIntake(athleteId) {
+  cache.delete(athleteId);
 }
 
 const isFresh = (entry, now) => Boolean(entry) && now - entry.readAt <= INTAKE_UNDO_MS;
@@ -101,7 +106,7 @@ export function useParallaxIntakes(athleteIds, { enabled = false } = {}) {
     const result = await createIntake(athleteId, body);
     // The server's own time replaces this on the next read; until then the
     // device's clock dates the tick (and starts its ten-minute undo).
-    remember(athleteId, result.status === 'already' ? result.milestone : { ...body, at: new Date() });
+    remember(athleteId, result.status === 'already' ? result.milestone : deviceStamped({ ...body, at: new Date() }));
     return result.status;
   };
 
@@ -111,9 +116,15 @@ export function useParallaxIntakes(athleteIds, { enabled = false } = {}) {
       show(athleteId, null);
       return;
     }
+    // Only the mark this screen shows is deleted; a different one stored there is shown instead and the save fails.
+    const shown = Object.prototype.hasOwnProperty.call(overrides, athleteId) ? overrides[athleteId] : state.data?.byAthlete?.[athleteId];
     try {
-      await deleteIntake(athleteId);
+      await deleteIntake(athleteId, undefined, expectedMark(shown));
     } catch (err) {
+      if (err?.reason === MARK_CHANGED) {
+        remember(athleteId, err.stored);
+        throw err;
+      }
       // A refusal may mean the tick is already gone (the owner cleared it on
       // another device while this screen or the cache still showed it): read
       // it again. Gone is what undo wanted; a tick still there shows as

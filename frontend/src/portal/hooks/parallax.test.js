@@ -25,7 +25,7 @@ import { auth } from '../../firebase';
 import * as live from './live';
 import { ERR, LiveDataError } from './live';
 import * as adapter from './parallaxLive';
-import { clearIntakeCache, useParallaxIntakes } from './parallax';
+import { clearIntakeCache, forgetIntake, useParallaxIntakes } from './parallax';
 
 const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 // Under fake timers settle's setTimeout never fires (Global Constraints): flush instead.
@@ -125,7 +125,7 @@ test('undo clears', async () => {
   adapter.deleteIntake.mockResolvedValue();
   const { result, unmount } = await mountHook(on(['a1', 'a2']));
   await act(async () => { await result.current.undo('a1'); });
-  expect(adapter.deleteIntake).toHaveBeenCalledWith('a1');
+  expect(adapter.deleteIntake).toHaveBeenCalledWith('a1', undefined, { by: 'u-luke', at: M.at, fromServer: true });
   expect(result.current.data.byAthlete.a1).toBeNull();
   await unmount();
   const again = await mountHook(on(['a1']));
@@ -255,5 +255,55 @@ test('seed: r1 and r4 ticked', async () => {
   clearIntakeCache();
   const again = await mountHook(on(['r2']));
   expect(again.result.current.data.byAthlete.r2).toBeNull();
+  await again.unmount();
+});
+
+describe('an undo or clear deletes only the tick the attendance screen showed (card 14, round 6)', () => {
+  const changed = (stored) => Object.assign(new LiveDataError(ERR.UNKNOWN, 'changed', null, adapter.MARK_CHANGED), { stored });
+
+  test('a tick that came from a read is passed as expected with its author and server time', async () => {
+    adapter.deleteIntake.mockResolvedValue();
+    const { result, unmount } = await mountHook(on(['a1']));
+    await act(async () => { await result.current.undo('a1'); });
+    expect(adapter.deleteIntake).toHaveBeenCalledWith('a1', undefined, { by: 'u-luke', at: M.at, fromServer: true });
+    await unmount();
+  });
+
+  test("a tick this screen wrote is passed as expected by its author alone (the device time is not the server's)", async () => {
+    adapter.createIntake.mockResolvedValue({ status: 'done' });
+    adapter.deleteIntake.mockResolvedValue();
+    const { result, unmount } = await mountHook(on(['a1', 'a2']));
+    await act(async () => { await result.current.tick('a2'); });
+    await act(async () => { await result.current.undo('a2'); });
+    expect(adapter.deleteIntake).toHaveBeenCalledWith('a2', undefined, { by: 'u-luke', fromServer: false });
+    await unmount();
+  });
+
+  test('another coach replaced the tick: the stored one shows, nothing is deleted here, and the failure is not the ten-minutes one', async () => {
+    const theirs = { ...M, by: 'u-sam', byName: 'Sam', at: new Date('2026-11-05T21:30:00Z') };
+    adapter.deleteIntake.mockRejectedValue(changed(theirs));
+    const { result, unmount } = await mountHook(on(['a1']));
+    let thrown;
+    await act(async () => { try { await result.current.undo('a1'); } catch (err) { thrown = err; } });
+    expect(thrown).toBeTruthy();
+    expect(thrown.code).not.toBe(ERR.PERMISSION);
+    expect(adapter.fetchIntake).toHaveBeenCalledTimes(1);
+    expect(result.current.data.byAthlete.a1).toEqual(theirs);
+    // The next tap expects the tick now shown.
+    adapter.deleteIntake.mockResolvedValue();
+    await act(async () => { await result.current.undo('a1'); });
+    expect(adapter.deleteIntake).toHaveBeenLastCalledWith('a1', undefined, { by: 'u-sam', at: theirs.at, fromServer: true });
+    await unmount();
+  });
+});
+
+test('forgetIntake makes the next open read that athlete again, and no other', async () => {
+  const first = await mountHook(on(['a1', 'a2']));
+  await first.unmount();
+  expect(adapter.fetchIntake).toHaveBeenCalledTimes(2);
+  forgetIntake('a2');
+  const again = await mountHook(on(['a1', 'a2']));
+  expect(adapter.fetchIntake).toHaveBeenCalledTimes(3);
+  expect(adapter.fetchIntake).toHaveBeenLastCalledWith('a2');
   await again.unmount();
 });

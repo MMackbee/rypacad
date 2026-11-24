@@ -12,14 +12,46 @@
  * update and refuse it: the refusal is re-read, and a tick that is there
  * answers `{ status: 'already', milestone }` (Review Focus 4), so the screen
  * shows the earlier tick instead of an error. Every write bumps INTAKE_KEY.
+ *
+ * An undo or clear deletes only the mark the screen showed (hq card 14, round 6):
+ * deleteIntake takes that mark as `expected` and checks it against the stored
+ * one inside a transaction, so a tap never erases a replacement it did not see.
  */
-import { deleteDoc, doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { doc, getDoc, runTransaction, serverTimestamp, setDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { ERR, LiveDataError, requireUser, wrap } from './live';
 import { bump } from './invalidate';
 import { INTAKE_DOC_ID } from '../data/combine';
 
 export const INTAKE_KEY = 'milestones';
+/** `reason` of the error deleteIntake throws when the stored mark is not the one shown; `stored` carries it. */
+export const MARK_CHANGED = 'mark-changed';
+
+/** Marks a screen stamped with its own clock (a tick it just wrote): their `at` is not the server's. */
+const deviceMarks = new WeakSet();
+export function deviceStamped(milestone) {
+  deviceMarks.add(milestone);
+  return milestone;
+}
+
+/**
+ * What an undo or clear expects to find stored, from the mark the screen shows
+ * (null: it shows none). A mark that came from a read is matched on author and
+ * server time; one this screen just ticked carries the device's time, so only
+ * its author is matched.
+ */
+export function expectedMark(milestone) {
+  if (!milestone) return null;
+  return deviceMarks.has(milestone)
+    ? { by: milestone.by, fromServer: false }
+    : { by: milestone.by, at: milestone.at, fromServer: true };
+}
+
+const millis = (t) => (t && typeof t.toMillis === 'function' ? t.toMillis() : t instanceof Date ? t.getTime() : NaN);
+function isShownMark(stored, expected) {
+  if (!expected || stored.by !== expected.by) return false;
+  return !expected.fromServer || millis(stored.at) === millis(expected.at);
+}
 
 const intakeRef = (athleteId, docId) => doc(db, 'athletes', athleteId, INTAKE_KEY, docId);
 
@@ -64,14 +96,33 @@ export async function createIntake(athleteId, body, docId = INTAKE_DOC_ID) {
   return { status: 'done' };
 }
 
-/** Undo (the ticker inside ten minutes) or the owner's clear; the rules decide which may. */
-export async function deleteIntake(athleteId, docId = INTAKE_DOC_ID) {
+/**
+ * Undo (the ticker inside ten minutes) or the owner's clear; the rules decide which may.
+ * `expected` is expectedMark(the mark on screen), or null when the screen shows none;
+ * leaving it out is refused. The mark is deleted only when the stored one is it. Gone
+ * already: nothing to do. A different mark: nothing is deleted, and the error
+ * (reason MARK_CHANGED, code not a permission refusal) carries it as `stored`.
+ */
+export async function deleteIntake(athleteId, docId = INTAKE_DOC_ID, expected) {
   requireAthlete(athleteId, 'deleteIntake');
   requireUser();
+  if (expected === undefined) throw new LiveDataError(ERR.INVALID, 'deleteIntake: the mark on screen is required.');
+  let stored;
   try {
-    await deleteDoc(intakeRef(athleteId, docId));
+    const ref = intakeRef(athleteId, docId);
+    stored = await runTransaction(db, async (tx) => {
+      const snap = await tx.get(ref);
+      const found = snap.exists() ? snap.data() : null;
+      if (found && isShownMark(found, expected)) tx.delete(ref);
+      return found && !isShownMark(found, expected) ? { changed: found } : {};
+    });
   } catch (err) {
     throw wrap(err, 'deleteIntake');
+  }
+  if (stored.changed) {
+    const err = new LiveDataError(ERR.UNKNOWN, 'deleteIntake: the mark has changed since it was shown.', null, MARK_CHANGED);
+    err.stored = stored.changed;
+    throw err;
   }
   bump(INTAKE_KEY);
 }

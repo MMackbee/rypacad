@@ -6,19 +6,28 @@
 jest.mock('../../firebase', () => ({ auth: { currentUser: { uid: 'u-luke' } }, db: {} }));
 jest.mock('firebase/firestore', () => ({
   doc: jest.fn((db, ...p) => ({ path: p.join('/') })),
-  getDoc: jest.fn(), setDoc: jest.fn(), deleteDoc: jest.fn(), serverTimestamp: jest.fn(() => 'NOW'),
+  getDoc: jest.fn(), setDoc: jest.fn(), deleteDoc: jest.fn(), runTransaction: jest.fn(), serverTimestamp: jest.fn(() => 'NOW'),
 }));
-import { deleteDoc, doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { deleteDoc, doc, getDoc, runTransaction, serverTimestamp, setDoc } from 'firebase/firestore';
 import { ERR } from './live';
-import { INTAKE_KEY, createIntake, deleteIntake, fetchIntake, intakeStamp } from './parallaxLive';
+import { INTAKE_KEY, MARK_CHANGED, createIntake, deleteIntake, deviceStamped, expectedMark, fetchIntake, intakeStamp } from './parallaxLive';
 
 const PATH = 'athletes/a1/milestones/parallaxIntake';
 const BODY = { athleteId: 'a1', at: 'NOW', by: 'u-luke', byName: 'Luke' };
+let stored;
+let tx;
+const ts = (ms) => ({ toMillis: () => ms });
+// A mark as a read returns it: the server's time on it.
+const READ = (by = 'u-luke', ms = 1000) => ({ athleteId: 'a1', at: ts(ms), by, byName: 'X' });
 
 // CRA's resetMocks strips the factory implementations before every test; put them back.
 beforeEach(() => {
   doc.mockImplementation((db, ...p) => ({ path: p.join('/') }));
   serverTimestamp.mockImplementation(() => 'NOW');
+  // The transaction runs its callback against whatever mark is "stored" (null: none).
+  stored = null;
+  tx = { get: jest.fn(async () => ({ exists: () => stored != null, data: () => stored })), delete: jest.fn() };
+  runTransaction.mockImplementation(async (_db, fn) => fn(tx));
 });
 
 test('one get per athlete; missing is null', async () => {
@@ -53,12 +62,62 @@ test('a refusal for another reason is not re-read', async () => {
   expect(getDoc).not.toHaveBeenCalled();
 });
 
-test('undo deletes by path', async () => {
-  deleteDoc.mockResolvedValueOnce();
-  await deleteIntake('a1');
-  expect(deleteDoc).toHaveBeenCalledWith({ path: PATH });
-  deleteDoc.mockRejectedValueOnce({ code: 'permission-denied' });
-  await expect(deleteIntake('a1')).rejects.toMatchObject({ code: ERR.PERMISSION });
+test('undo deletes by path, in a transaction, when the stored mark is the one shown', async () => {
+  stored = READ();
+  await deleteIntake('a1', undefined, expectedMark(READ()));
+  expect(tx.get).toHaveBeenCalledWith({ path: PATH });
+  expect(tx.delete).toHaveBeenCalledWith({ path: PATH });
+  expect(deleteDoc).not.toHaveBeenCalled();
+  tx.delete.mockClear();
+  runTransaction.mockRejectedValueOnce({ code: 'permission-denied' });
+  await expect(deleteIntake('a1', undefined, expectedMark(READ()))).rejects.toMatchObject({ code: ERR.PERMISSION });
+});
+
+describe('an undo or clear deletes only the mark the screen showed (card 14, round 6)', () => {
+  test('a different author stored there: nothing is deleted, the stored mark comes back, and it is not a permission error', async () => {
+    stored = READ('u-coach', 5000);
+    const err = await deleteIntake('a1', undefined, expectedMark(READ('u-owner', 1000))).catch((e) => e);
+    expect(tx.delete).not.toHaveBeenCalled();
+    expect(err.reason).toBe(MARK_CHANGED);
+    expect(err.code).not.toBe(ERR.PERMISSION);
+    expect(err.stored).toEqual(stored);
+  });
+
+  test('the same author but a newer server time: a replacement, not the shown mark, so nothing is deleted', async () => {
+    stored = READ('u-owner', 9000);
+    await expect(deleteIntake('a1', undefined, expectedMark(READ('u-owner', 1000)))).rejects.toMatchObject({ reason: MARK_CHANGED });
+    expect(tx.delete).not.toHaveBeenCalled();
+  });
+
+  test('a mark this screen ticked itself carries the device time: the author alone decides', async () => {
+    const mine = deviceStamped({ athleteId: 'a1', at: new Date(123), by: 'u-luke', byName: 'Luke' });
+    stored = READ('u-luke', 99999);
+    await deleteIntake('a1', undefined, expectedMark(mine));
+    expect(tx.delete).toHaveBeenCalledTimes(1);
+    tx.delete.mockClear();
+    stored = READ('u-sam', 99999);
+    await expect(deleteIntake('a1', undefined, expectedMark(mine))).rejects.toMatchObject({ reason: MARK_CHANGED });
+    expect(tx.delete).not.toHaveBeenCalled();
+  });
+
+  test('the stored mark is gone: no delete and no error', async () => {
+    stored = null;
+    await expect(deleteIntake('a1', undefined, expectedMark(READ()))).resolves.toBeUndefined();
+    expect(tx.delete).not.toHaveBeenCalled();
+  });
+
+  test('a screen that shows no mark deletes nothing: a mark that is there comes back as changed', async () => {
+    stored = READ();
+    await expect(deleteIntake('a1', undefined, null)).rejects.toMatchObject({ reason: MARK_CHANGED });
+    expect(tx.delete).not.toHaveBeenCalled();
+  });
+
+  test('a call without the shown mark is refused, never a bare delete', async () => {
+    stored = READ();
+    await expect(deleteIntake('a1')).rejects.toMatchObject({ code: ERR.INVALID });
+    expect(tx.delete).not.toHaveBeenCalled();
+    expect(deleteDoc).not.toHaveBeenCalled();
+  });
 });
 
 test('athleteId is required', async () => {
@@ -85,12 +144,12 @@ describe('the fitness assessment mark (hq card 14): the same calls with a doc id
     setDoc.mockResolvedValueOnce();
     expect(await createIntake('a1', BODY, 'fitnessAssessment')).toEqual({ status: 'done' });
     expect(setDoc).toHaveBeenLastCalledWith({ path: FIT }, BODY);
-    deleteDoc.mockResolvedValueOnce();
-    await deleteIntake('a1', 'fitnessAssessment');
-    expect(deleteDoc).toHaveBeenLastCalledWith({ path: FIT });
-    deleteDoc.mockResolvedValueOnce();
-    await deleteIntake('a1');
-    expect(deleteDoc).toHaveBeenLastCalledWith({ path: PATH });
+    stored = READ();
+    await deleteIntake('a1', 'fitnessAssessment', expectedMark(READ()));
+    expect(tx.get).toHaveBeenLastCalledWith({ path: FIT });
+    expect(tx.delete).toHaveBeenLastCalledWith({ path: FIT });
+    await deleteIntake('a1', undefined, expectedMark(READ()));
+    expect(tx.delete).toHaveBeenLastCalledWith({ path: PATH });
   });
 
   test("a fitness tick that is already there answers 'already' from the fitness doc", async () => {
