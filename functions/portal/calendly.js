@@ -46,10 +46,13 @@ const {docOf, inviteeOf, isRypOneOnOne, resolveAthlete} = resolve;
 
 /**
  * Yannick's per-athlete monthly cadence. CHANGE ONE, CHANGE BOTH with
- * `frontend/src/portal/data/specialists.js:112`.
- * @const {{elite: number, default: number}}
+ * `frontend/src/portal/data/specialists.js` (MENTAL_MONTHLY_CAP).
+ * The owner removed the limit on 2026-11-23 ("there shouldnt be a cap on
+ * these"); it was one a month, two on Elite. `null` means tokens are the
+ * only limit, as for Performance sessions.
+ * @const {{elite: ?number, default: ?number}}
  */
-const MENTAL_MONTHLY_CAP = {elite: 2, default: 1};
+const MENTAL_MONTHLY_CAP = {elite: null, default: null};
 const EVENTS = ['invitee.created', 'invitee.canceled'];
 const TYPE = 'mental';
 const LABEL = 'Mental game session';
@@ -76,11 +79,23 @@ function uuidOf(uri) {
 
 /**
  * @param {?Object} pkg A `packages/{id}` body.
- * @return {number} Mental sessions allowed per calendar month.
+ * @return {?number} Mental sessions allowed per calendar month; null is
+ *     no limit.
  */
 function mentalCapFor(pkg) {
   return pkg && pkg.kind === 'elite' ? MENTAL_MONTHLY_CAP.elite :
       MENTAL_MONTHLY_CAP.default;
+}
+
+/**
+ * True only when a cap is set and the month's count has reached it. With no
+ * cap (null or undefined) it is always false: tokens are the only limit.
+ * @param {number} used Mental sessions already booked this month.
+ * @param {?number=} cap What `mentalCapFor` returned.
+ * @return {boolean} Whether this booking is over the cadence.
+ */
+function overCadence(used, cap) {
+  return typeof cap === 'number' && used >= cap;
 }
 
 /**
@@ -305,7 +320,7 @@ async function applyCreated(tx, c) {
     flag = 'membership-inactive';
   } else if (!lib.bookingOpen(nowDate, pkg)) {
     flag = 'before-open';
-  } else if (mentalThisMonth >= mentalCapFor(pkg)) {
+  } else if (overCadence(mentalThisMonth, mentalCapFor(pkg))) {
     flag = 'over-cadence';
   } else if (!charge.chargedFrom) {
     flag = 'over-cap';
@@ -455,5 +470,5 @@ const calendlyWebhook = functions.runWith({secrets: CALENDLY_SECRETS})
 module.exports = {
   MENTAL_MONTHLY_CAP, attendeeOf, calendlyWebhook, handleCalendlyEvent,
   inviteeOf, kidByName: resolve.kidByName, mentalCapFor,
-  nameKey: resolve.nameKey, slotOf, uuidOf,
+  nameKey: resolve.nameKey, overCadence, slotOf, uuidOf,
 };

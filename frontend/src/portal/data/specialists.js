@@ -95,6 +95,10 @@ export function repeatsWeekly(type) {
  * no allowance of their own to cap — so this is no longer a pool limit at
  * all. It is a CADENCE rule: `{ phil: null, mental: 1 }`.
  *
+ * NOTE 2026-11-23: the owner removed the limit, so `mental` is now `null` too
+ * and everything below that says `mental: 1` describes the rule as it was;
+ * see MENTAL_MONTHLY_CAP further down.
+ *
  *   phil: null    tokens are the only limit on Phil sessions. Phil runs
  *                 group blocks (capacity 6) just like training/tournament
  *                 blocks; nothing about booking one is special once it
@@ -118,12 +122,16 @@ export function repeatsWeekly(type) {
  * "1:1 time" cadence applies to every athlete alike.
  */
 /**
- * v2.0.1 (Sprint 18): Yannick's monthly cadence is PER PACKAGE - Elite
- * includes two individual sessions a month, everyone else one. Owner-tunable
+ * v2.0.1 (Sprint 18): Yannick's monthly cadence is PER PACKAGE. Owner-tunable
  * here; `mentalCapFor(pkg)` is what the booking gate, the coaching line and
  * the slot picker read.
+ *
+ * 2026-11-23: the owner removed the limit ("there shouldnt be a cap on
+ * these"). It was one a month, two on Elite. `null` means tokens are the only
+ * limit, as for Performance sessions. CHANGE ONE, CHANGE BOTH with
+ * `functions/portal/calendly.js` (MENTAL_MONTHLY_CAP).
  */
-export const MENTAL_MONTHLY_CAP = { elite: 2, default: 1 };
+export const MENTAL_MONTHLY_CAP = { elite: null, default: null };
 
 export function mentalCapFor(pkg) {
   return pkg && pkg.kind === 'elite' ? MENTAL_MONTHLY_CAP.elite : MENTAL_MONTHLY_CAP.default;

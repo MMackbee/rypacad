@@ -437,8 +437,9 @@ paragraph in full.** Phil and Yannick sessions spend an ordinary token; what
 `SPECIALIST_MONTHLY_CAP` still gates is **frequency**, independent of
 tokens: `SPECIALIST_MONTHLY_CAP = { phil: null, mental: 1 }` — `phil: null`
 means tokens are the only limit (the old fitness-package Phil cap is
-deleted); `mental: 1` per calendar month is the owner's stated 3-4 week
-cadence, still counted the same **non-cancelled bookings of that type, exact
+deleted); `mental: 1` per calendar month was the owner's stated 3-4 week
+cadence (**removed 2026-11-23, owner ruling: no cap on mental game
+sessions; the value is now `null`, see `MENTAL_MONTHLY_CAP` below**), counted the same **non-cancelled bookings of that type, exact
 calendar month** way the v1.7 cap always counted, just no longer creating an
 allowance of its own. `isSpecialistType` stays for display only.
 
@@ -1279,7 +1280,9 @@ deletes it from prod); prices are in `data/packages.js` but withheld from
 parents and athletes (`PRICES_RELEASED = false`); facility access is the
 athlete fields above; Elite's frequency caps are `eliteDailyCapHit()`
 (one training-or-tournament and one Phil booking per date) and
-`MENTAL_MONTHLY_CAP = { elite: 2, default: 1 }` (`mentalCapFor(pkg)`),
+`MENTAL_MONTHLY_CAP = { elite: 2, default: 1 }` (`mentalCapFor(pkg)`;
+**2026-11-23, owner ruling: the mental game cap is removed, both values are
+now `null`, and the server's `calendly.js` mirrors it**),
 enforced client-side in the booking gate like the v2.0 mental cadence —
 frequency rules, never charges; the schedule generator drops Tue/Thu 3 PM
 (reserved, invite-only, not on the shared calendar; a title that is not

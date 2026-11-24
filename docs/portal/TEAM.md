@@ -2841,6 +2841,11 @@ Keystones (from the amendments, restated as build facts):
   `mentalCapFor(pkg)` in specialists.js, used by the gate, the coaching
   line and the Yannick slot picker. A token-package athlete's Yannick 1:1
   spends a token (unchanged); Elite's two are included.
+  OWNER 2026-11-23 - NO LIMIT: the owner removed this cap ("there shouldnt
+  be a cap on these"). The numbers above (Elite two, everyone else one) are
+  superseded, not deleted: both `MENTAL_MONTHLY_CAP` constants now hold
+  `{ elite: null, default: null }` and tokens are the only limit, as for
+  Phil. The mechanism stays for the day a number comes back.
 - Docs: DATA-MODEL (packages, athletes.facilityAccess /
   facilityAccessConsent, enrollmentRequests.consents, sessions capacity,
   schedule), the two owner documents committed as-is, DECISION-GAPS.
@@ -3324,6 +3329,10 @@ Pins (change one, change both):
   the same reason `lib.js` duplicates the period math). A change to
   Yannick's monthly cadence edits BOTH and both tests
   (`data/amendments.test.js`, `functions/test/verify-calendly.js` STEP G over-cadence).
+  OWNER 2026-11-23 - NO LIMIT: both files now hold `{ elite: null,
+  default: null }` (the numbers 2 and 1 above are superseded). The two still
+  change together; `functions/portal/calendly.test.js` holds them equal, and
+  the webhook flags `over-cadence` only when a number is set.
 - `SPECIALIST_DURATION_MINUTES = { phil: 45, mental: 30 }` in
   `scripts/seed-firestore.mjs` mirrors `data/specialists.js`
   `durationMinutes` (routing lane) - the seed names the number rather than
