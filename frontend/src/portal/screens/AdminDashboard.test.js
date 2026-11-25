@@ -293,3 +293,31 @@ test('Find a family sits right after Outstanding, for owner and ops', async () =
     await r.unmount();
   }
 });
+
+// The athlete roster (hq card 14, 2026-11-23): owner and ops reach it from a card straight after Sign-ups.
+test('the Athletes card opens the athlete roster, for owner and ops; hidden without a destination', async () => {
+  for (const role of ['owner', 'ops']) {
+    const opened = [];
+    const r = await renderScreen(<AdminDashboard bare role={role} onOpenAthletes={() => opened.push(role)} />);
+    expect(r.text()).toContain('Athletes');
+    expect(r.text()).toContain('Every athlete, with their package and the Parallax and fitness marks.');
+    await r.click('Open athlete roster');
+    expect(opened).toEqual([role]);
+    await r.unmount();
+  }
+  const none = await renderScreen(<AdminDashboard bare role="owner" />);
+  expect(none.button('Open athlete roster')).toBeNull();
+  await none.unmount();
+});
+
+test('the Athletes card sits directly after the Sign-ups card, before Assessments', async () => {
+  const r = await renderScreen(<AdminDashboard bare role="owner" onOpenAthletes={() => {}} onOpenAssessments={() => {}} onOpenSignups={() => {}} />);
+  const text = r.text();
+  const signups = text.indexOf('Sign-ups');
+  const athletes = text.indexOf('Open athlete roster');
+  const assessments = text.indexOf('Open assessments');
+  expect(signups).toBeGreaterThanOrEqual(0);
+  expect(athletes).toBeGreaterThan(signups);
+  expect(assessments).toBeGreaterThan(athletes);
+  await r.unmount();
+});

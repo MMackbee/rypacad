@@ -3,6 +3,7 @@ import {
   bestIds, canDeleteScore, canTickIntake, combineDateFloor, combineDateProblem, combineEntryRole, combineScoreDoc,
   combineSummary, distanceLabel, firstName, formatScore, intakeByName, intakeDoc, intakeDoneLine, intakeUndo,
   parseScore, roleWord, shortDay, sortScores,
+  FITNESS_DOC_ID, FITNESS_LABEL, FITNESS_LOAD_ERROR, INTAKE_DOC_ID, INTAKE_LABEL, INTAKE_LOAD_ERROR, MARK_NOT_DONE, markWords,
 } from './combine';
 
 const at = (iso) => new Date(iso);
@@ -153,5 +154,33 @@ describe('Parallax intake swings', () => {
     expect(intakeUndo({ ...m, by: 'owner' }, owner, T + 60000)).toBe('undo');
     expect(intakeUndo(m, { uid: 'u-coach2', role: 'coach' }, T + 60000)).toBeNull();
     expect(intakeUndo(null, luke, T)).toBeNull();
+  });
+});
+
+describe('the second one-time mark, the fitness assessment (hq card 14)', () => {
+  test('its id, label and load error; the Parallax words are unchanged', () => {
+    expect(FITNESS_DOC_ID).toBe('fitnessAssessment');
+    expect(FITNESS_LABEL).toBe('Fitness assessment');
+    expect(FITNESS_LOAD_ERROR).toBe("Fitness assessment didn't load.");
+    expect(INTAKE_DOC_ID).toBe('parallaxIntake');
+    expect(INTAKE_LABEL).toBe('Parallax intake swings');
+    expect(INTAKE_LOAD_ERROR).toBe("Parallax intake swings didn't load.");
+  });
+
+  test('a mark known not to be done reads "not done" (the read-only roster, hq card 14 round 3)', () => {
+    expect(MARK_NOT_DONE).toBe('not done');
+  });
+
+  test('markWords picks the words by doc id; an unknown id falls back to Parallax', () => {
+    expect(markWords('fitnessAssessment')).toEqual({ label: 'Fitness assessment', loadError: "Fitness assessment didn't load." });
+    expect(markWords('parallaxIntake')).toEqual({ label: 'Parallax intake swings', loadError: "Parallax intake swings didn't load." });
+    expect(markWords()).toEqual(markWords('parallaxIntake'));
+    expect(markWords('somethingElse')).toEqual(markWords('parallaxIntake'));
+  });
+
+  test('the fitness mark is the same four keys and the same done line', () => {
+    expect(intakeDoc({ athleteId: 'jordan', uid: 'owner', byName: 'Owner', stamp: 'NOW' }))
+      .toEqual({ athleteId: 'jordan', at: 'NOW', by: 'owner', byName: 'Owner' });
+    expect(intakeDoneLine({ at: at('2026-11-12T23:30:00Z'), byName: 'Luke' })).toBe('done Nov 12 · Luke');
   });
 });

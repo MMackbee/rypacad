@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { TOUCH_MIN, color, font, radius } from '../../tokens';
 import { Body, Tick } from '../Primitives';
 import { ERR } from '../../hooks/live';
 import {
-  INTAKE_LABEL, INTAKE_LOAD_ERROR, INTAKE_SAVE_ERROR, INTAKE_UNDO_LATE, intakeDoneLine, intakeUndo,
+  INTAKE_LABEL, INTAKE_LOAD_ERROR, INTAKE_SAVE_ERROR, INTAKE_UNDO_LATE, MARK_CHANGED, MARK_NOT_DONE, intakeDoneLine, intakeUndo,
 } from '../../data/combine';
 
 const pill = (tone) => ({
@@ -26,29 +26,95 @@ const pill = (tone) => ({
  * `milestone` undefined renders nothing (or the load error), so a row never
  * reads "not done" before its read lands. Undo is for whoever ticked it,
  * inside ten minutes; the owner clears any tick behind an inline confirm.
+ * `label` and `loadErrorText` default to the Parallax words; the athlete
+ * roster passes the fitness assessment's (hq card 14).
+ * `readOnly` (the roster as ops sees it) turns the mark into status text: the
+ * label, then the done line or "not done", no button and nothing to Tab to.
+ * The attendance screen never passes it. While a tick, undo or clear saves,
+ * the control is dimmed and aria-busy (no spinner). After the owner's Clear or
+ * Keep, focus returns to the tick.
  * Who may do what is data/combine.js; `now` is re-read at tap time, so a
  * screen left open past the ten minutes says why instead of failing.
  */
-export default function ParallaxTick({ name, milestone, viewer, canTick, onTick, onUndo, loadError = false, now = Date.now }) {
+export default function ParallaxTick({
+  name, milestone, viewer, canTick, onTick, onUndo, loadError = false, now = Date.now,
+  label = INTAKE_LABEL, loadErrorText = INTAKE_LOAD_ERROR, readOnly = false,
+}) {
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState(null);
   const [confirming, setConfirming] = useState(false);
-
-  if (milestone === undefined) {
-    return loadError ? <Body size={11} tone={color.error}>{INTAKE_LOAD_ERROR}</Body> : null;
-  }
+  const [refocus, setRefocus] = useState(false);
+  const tickRef = useRef(null);
+  const rootRef = useRef(null);
 
   const ticked = Boolean(milestone);
   const enabled = Boolean(canTick) && !busy && (!ticked || intakeUndo(milestone, viewer, now()) != null);
 
-  const run = async (write, failCopy) => {
+  // After Clear or Keep the confirm (and the button the finger was on) is gone: put focus back on the tick,
+  // now or never. Served in the render that follows the request; the request is dropped either way, and
+  // focus is never taken from another field or control the person has moved to meanwhile.
+  useEffect(() => {
+    if (!refocus) return;
+    setRefocus(false);
+    const tick = tickRef.current;
+    const at = document.activeElement;
+    const free = !at || at === document.body || (rootRef.current != null && rootRef.current.contains(at));
+    if (tick && !tick.disabled && free) tick.focus();
+  }, [refocus]);
+
+  if (milestone === undefined) {
+    return loadError ? <Body size={11} tone={color.error}>{loadErrorText}</Body> : null;
+  }
+
+  if (readOnly) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        <span
+          aria-hidden="true"
+          style={{
+            width: 26,
+            height: 26,
+            flex: 'none',
+            borderRadius: radius.pill,
+            boxSizing: 'border-box',
+            background: ticked ? color.primary : 'transparent',
+            color: color.faintText,
+            font: `400 14px/1 ${font.body}`,
+            display: 'grid',
+            placeItems: 'center',
+          }}
+        >
+          {ticked ? <Tick size={11} /> : '–'}
+        </span>
+        <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+          <span style={{ font: `600 12px ${font.body}`, color: color.text }}>{label}</span>
+          <span style={{ font: `400 11px ${font.body}`, color: color.textSecondary, marginTop: 2 }}>
+            {ticked ? intakeDoneLine(milestone) : MARK_NOT_DONE}
+          </span>
+        </span>
+      </div>
+    );
+  }
+
+  const run = async (write, failCopy, thenRefocus = false) => {
     setBusy(true);
     setProblem(null);
     try {
       await write();
       setConfirming(false);
+      setBusy(false);
+      if (thenRefocus) setRefocus(true);
+      return;
     } catch (err) {
       setProblem(failCopy(err));
+      // The mark on screen was replaced: the confirm was for a mark that is gone. Close it (the next tap
+      // asks again for the mark now shown) and put focus back on the tick, now or never.
+      if (thenRefocus && err && err.reason === MARK_CHANGED) {
+        setConfirming(false);
+        setBusy(false);
+        setRefocus(true);
+        return;
+      }
     }
     setBusy(false);
   };
@@ -70,12 +136,14 @@ export default function ParallaxTick({ name, milestone, viewer, canTick, onTick,
   };
 
   return (
-    <div>
+    <div ref={rootRef}>
       <button
+        ref={tickRef}
         type="button"
         role="checkbox"
         aria-checked={ticked}
-        aria-label={`${INTAKE_LABEL}: ${name}`}
+        aria-label={`${label}: ${name}`}
+        aria-busy={busy ? 'true' : undefined}
         disabled={!enabled}
         onClick={onClick}
         style={{
@@ -88,6 +156,7 @@ export default function ParallaxTick({ name, milestone, viewer, canTick, onTick,
           background: 'transparent',
           textAlign: 'left',
           cursor: enabled ? 'pointer' : 'default',
+          opacity: busy ? 0.55 : undefined,
         }}
       >
         <span
@@ -107,7 +176,7 @@ export default function ParallaxTick({ name, milestone, viewer, canTick, onTick,
           {ticked ? <Tick size={11} /> : null}
         </span>
         <span style={{ display: 'flex', flexDirection: 'column' }}>
-          <span style={{ font: `600 12px ${font.body}`, color: color.text }}>{INTAKE_LABEL}</span>
+          <span style={{ font: `600 12px ${font.body}`, color: color.text }}>{label}</span>
           {ticked ? (
             <span style={{ font: `400 11px ${font.body}`, color: color.textSecondary, marginTop: 2 }}>
               {intakeDoneLine(milestone)}
@@ -117,19 +186,20 @@ export default function ParallaxTick({ name, milestone, viewer, canTick, onTick,
       </button>
       {confirming ? (
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 4 }}>
-          <Body size={12} tone={color.text}>{`Clear ${INTAKE_LABEL} for ${name}?`}</Body>
+          <Body size={12} tone={color.text}>{`Clear ${label} for ${name}?`}</Body>
           <button
             type="button"
-            aria-label={`Clear ${INTAKE_LABEL}: ${name}`}
+            aria-label={`Clear ${label}: ${name}`}
             disabled={busy}
-            onClick={(e) => { e.stopPropagation(); run(onUndo, undoFailed); }}
+            onClick={(e) => { e.stopPropagation(); run(onUndo, undoFailed, true); }}
             style={pill(color.error)}
           >
             Clear
           </button>
           <button
             type="button"
-            onClick={(e) => { e.stopPropagation(); setConfirming(false); }}
+            aria-label={`Keep ${label}: ${name}`}
+            onClick={(e) => { e.stopPropagation(); setConfirming(false); setRefocus(true); }}
             style={pill(color.textSecondary)}
           >
             Keep

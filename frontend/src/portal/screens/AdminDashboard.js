@@ -13,6 +13,7 @@ import ManageBookingsCard from '../components/staffBooking/ManageBookingsCard';
 import ConsentTrackerCard from '../components/consent/ConsentTrackerCard';
 import ScholarshipsCard from '../components/ScholarshipsCard';
 import AssessmentsEntryCard from '../components/AssessmentsEntryCard';
+import { DASHBOARD_CARD } from '../data/athleteRoster';
 import { ReservedBlocks } from '../components/Reserved';
 import { useAdminDashboard } from '../hooks';
 import { contractEnabled } from '../data/contractFlag';
@@ -89,6 +90,8 @@ export { outstandingSummary } from '../components/OutstandingCard';
  *   an owner's; ops never mounts the card, so never makes its read.
  * @param {() => void} [onOpenDoor]  2026-11-17: the Facility door card, to
  *   /portal/admin/door (owner and ops); hidden without it.
+ * @param {() => void} [onOpenAthletes]  2026-11-23 (hq card 14): the Athletes
+ *   card, to /portal/admin/athletes (owner and ops); hidden without it.
  * @param {object} [demoMembership]  HARNESS-ONLY (Sprint 13, contract v2.1) —
  *   overrides the Membership card's data. useAdminDashboard's seed branch
  *   does not produce a `membership` field in this worktree yet (routing
@@ -105,6 +108,7 @@ export default function AdminDashboard({
   onOpenScholarships,
   onOpenAssessments,
   onOpenDoor,
+  onOpenAthletes,
   demoMembership,
 }) {
   // Speed review F6 (2026-11-17): `data` fills in card by card as each
@@ -179,6 +183,10 @@ export default function AdminDashboard({
         {/* Owner 2026-11-13: add, move or cancel any athlete's booking (spec 01-spec-admin-booking.md 10.2). */}
         <ManageBookingsCard />
         <SignupsCard onOpenSignups={onOpenSignups} />
+        {/* The athlete roster (2026-11-23, hq card 14): every athlete and the two one-time marks. */}
+        {onOpenAthletes ? (
+          <AssessmentsEntryCard onOpen={onOpenAthletes} title={DASHBOARD_CARD.title} label={DASHBOARD_CARD.label} body={DASHBOARD_CARD.body} />
+        ) : null}
         {/* 2026-10-14 (assessments spec 5): owners and ops reach the assessments from here. */}
         {onOpenAssessments ? <AssessmentsEntryCard onOpen={onOpenAssessments} /> : null}
         {/* The facility door (2026-11-17 spec 7): the same entry card, to /portal/admin/door. */}

@@ -44,8 +44,16 @@ export const COMBINE_EMPTY = 'No scores yet.';
 export const NO_SCORE = 'No score yet';
 export const DELETE_PROMPT = 'Delete this score?';
 export const INTAKE_SAVE_ERROR = 'Not saved. Tap to try again.';
+/** `reason` of the error an undo or clear fails with when the stored mark is not the one shown (hooks/parallaxLive.js). */
+export const MARK_CHANGED = 'mark-changed';
 export const INTAKE_UNDO_LATE = 'Ten minutes have passed. Ask the owner to clear it.';
 export const INTAKE_LOAD_ERROR = "Parallax intake swings didn't load.";
+// The second one-time mark (hq card 14, 2026-11-23): the owner's "fitness assessment done", the same four keys.
+export const FITNESS_LABEL = 'Fitness assessment';
+export const FITNESS_DOC_ID = 'fitnessAssessment';
+export const FITNESS_LOAD_ERROR = "Fitness assessment didn't load.";
+// A mark known not to be done, where it is status text and not a control (the roster as ops sees it; round 3).
+export const MARK_NOT_DONE = 'not done';
 
 const DISTANCE_IDS = COMBINE_DISTANCES.map((d) => d.id);
 const ENTRY_ROLES = ['coach', 'owner', 'athlete', 'parent'];
@@ -177,7 +185,14 @@ export function intakeByName({ displayName, authName, role }) {
   return firstName(displayName) ?? firstName(authName) ?? (role === 'owner' ? 'Owner' : 'Coach');
 }
 
-/** athletes/{id}/milestones/parallaxIntake: exactly the four keys the rules accept. */
+/** The label and load error of a one-time mark by its doc id; an unknown id reads as Parallax. */
+export function markWords(docId = INTAKE_DOC_ID) {
+  return docId === FITNESS_DOC_ID
+    ? { label: FITNESS_LABEL, loadError: FITNESS_LOAD_ERROR }
+    : { label: INTAKE_LABEL, loadError: INTAKE_LOAD_ERROR };
+}
+
+/** athletes/{id}/milestones/{parallaxIntake|fitnessAssessment}: exactly the four keys the rules accept. */
 export function intakeDoc({ athleteId, uid, byName, stamp }) {
   return { athleteId, at: stamp, by: uid, byName };
 }

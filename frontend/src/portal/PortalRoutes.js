@@ -61,6 +61,7 @@ const loadSettings = () => import('./screens/NotificationPreferences');
 const loadReservations = () => import('./screens/Reservations');
 const loadAdmin = () => import('./screens/AdminDashboard');
 const loadAdminSignups = () => import('./screens/AdminSignups');
+const loadAdminAthletes = () => import('./screens/AdminAthletes');
 // Owner only, and never warmed below: the warm-up runs before the role is
 // known, and ops has no use for this chunk.
 const loadAdminScholarships = () => import('./screens/AdminScholarships');
@@ -91,6 +92,7 @@ const NotificationPreferences = lazy(loadSettings);
 const Reservations = lazy(loadReservations);
 const AdminDashboard = lazy(loadAdmin);
 const AdminSignups = lazy(loadAdminSignups);
+const AdminAthletes = lazy(loadAdminAthletes);
 const AdminScholarships = lazy(loadAdminScholarships);
 const StaffRoles = lazy(loadStaff);
 const TourStandings = lazy(loadTour);
@@ -466,11 +468,28 @@ function AdminRoute({ onOpenAthlete, onSignOut }) {
       onOpenAthlete={onOpenAthlete ? (id) => navigate(staffAthletePath(id)) : undefined}
       onOpenHousehold={(id) => navigate(`/portal/admin/households/${id}`)}
       onOpenSignups={() => navigate('/portal/admin/signups')}
+      onOpenAthletes={() => navigate('/portal/admin/athletes')}
       onOpenScholarships={owner ? () => navigate('/portal/admin/scholarships') : undefined}
       onOpenAssessments={() => navigate('/portal/assessments')}
       onOpenDoor={() => navigate('/portal/admin/door')}
       onSignOut={onSignOut}
     />
+  );
+}
+
+/**
+ * The athlete roster (2026-11-23, hq card 14): every athlete with the Parallax and
+ * fitness marks; a family's name opens that household's staff page. The role is
+ * the signed-in account's, waited for while a live session resolves.
+ */
+function AthletesRoute() {
+  const live = isLive();
+  const { user, loading } = useAuthSession(live ? undefined : { variant: 'idle' });
+  const navigate = useNavigate();
+  if (live && loading) return null;
+  return (
+    <AdminAthletes bare role={(live && user?.role) || 'owner'} onBack={() => navigate('/portal/admin')}
+      onOpenHousehold={(id) => navigate(`/portal/admin/households/${id}`)} />
   );
 }
 
@@ -1167,6 +1186,8 @@ export default function PortalRoutes() {
           </RequireRole>
         }
       />
+      {/* The roster of every athlete (hq card 14): a static path, never an athlete id. */}
+      <Route path="admin/athletes" element={<RequireRole roles={['ops', 'owner']}><AthletesRoute /></RequireRole>} />
       {/* 2026-11-16 (one family page): a click on an athlete lands on the family
           page, opened on them. The old athlete-bookings link goes there too. */}
       <Route path="admin/athletes/:athleteId" element={<RequireRole roles={['ops', 'owner']}><StaffAthleteRedirect /></RequireRole>} />
